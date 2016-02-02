@@ -1,9 +1,9 @@
 # BNO055 AT style driver
 
 
-## =============================================================================
-## (c) by Thomas Welsch / 2016 under the GNU Lesser General Public License
-## =============================================================================
+### =============================================================================
+### (c) by Thomas Welsch / 2016 under the GNU Lesser General Public License
+### =============================================================================
 
 This driver implements a simple "AT" style interface for the BNO055 sensor
 chip (BOSCH).
