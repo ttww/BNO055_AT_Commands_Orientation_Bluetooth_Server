@@ -12,32 +12,37 @@ serial interface on pins 0/1) and Arduino Nano.
 
 ### Current commands:
 ```
-AT     : OK
-ATH    : Display help
-ATI    : Display sensor details
-ATS    : Display sensor status
-ATC    : Display sensor status (calibration)
-ATT    : Display sensor temperatur in C degree
-ATO    : Display sensor orientation in Euler degree
-ATO1   :   Enable continuous Euler degree output
-ATO0   :   Disable E1
-ATA    : Display sensor accelerometer in m/s^2
-ATA1   :   Enable continuous accelerometer output
-ATA0   :   Disable A1
-ATY    : Display sensor gyroscope in rad/s
-ATY1   :   Enable continuous gyroscope output
-ATY0   :   Disable Y1
-ATM    : Display sensor magnetometer in uT
-ATM1   :   Enable continuous magnetometer output
-ATM0   :   Disable G1
-ATG    : Display sensor gravity in m/s^2
-ATG1   :   Enable continuous gravity output
-ATG0   :   Disable G1
-ATL    : Display sensor linear accelerometer in m/s^2
-ATL1   :   Enable continuous linear accelerometer output
-ATL0   :   Disable L1
-AT1    : Enable continuous linear accelerometer output of all sensor data
-AT0    : Disable AT1
+AT       : OK
+ATH      : Display help
+ATI      : Display sensor details
+ATS      : Display sensor status
+ATC      : Display sensor status (calibration)
+ATT      : Display sensor temperatur in C degree
+ATO      : Display sensor orientation in Euler degree
+ATO1     :   Enable continuous Euler degree output
+ATO0     :   Disable E1
+ATA      : Display sensor accelerometer in m/s^2
+ATA1     :   Enable continuous accelerometer output
+ATA0     :   Disable A1
+ATY      : Display sensor gyroscope in rad/s
+ATY1     :   Enable continuous gyroscope output
+ATY0     :   Disable Y1
+ATM      : Display sensor magnetometer in uT
+ATM1     :   Enable continuous magnetometer output
+ATM0     :   Disable G1
+ATG      : Display sensor gravity in m/s^2
+ATG1     :   Enable continuous gravity output
+ATG0     :   Disable G1
+ATL      : Display sensor linear accelerometer in m/s^2
+ATL1     :   Enable continuous linear accelerometer output
+ATL0     :   Disable L1
+AT1      : Enable continuous linear accelerometer output of all sensor data
+AT0      : Disable AT1
+ATB=xxx  : Setting the baud rate. xxx can be 1200,2400,4800,9600,19200,38400,57600,115200
+           You need to reconnect. If we have a HC-06, the bluetooth speed is also changed.
+           This change is permanent.
+ATF      : Shows the free RAM in bytes.
+
 ```
 
 ### Example:
@@ -85,7 +90,9 @@ Connect RX to HC-06 TX
 Connect VDD to 5V DC
 Connect GROUND to common ground
 ```
-You should setup the HC-06 modul to the right baudrate separately.
+The HC-06 baudrate can be set via the ATB=xxx command.
+The HC-06 PIN can be set via the ATP=xxx command.            (TODO !)
+The HC-06 bluetooth name can be set via the ATN=xxx command. (TODO !)
 
 ### Credits:
 Based on some examples from adafruit / KTOWN, but not much left anymore :-)

@@ -14,31 +14,36 @@
    Current commands:
    =============================================================================
     AT     : OK
-    ATH    : Display help
-    ATI    : Display sensor details
-    ATS    : Display sensor status
-    ATC    : Display sensor status (calibration)
-    ATT    : Display sensor temperatur in C degree
-    ATO    : Display sensor orientation in Euler degree
-    ATO1   :   Enable continuous Euler degree output
-    ATO0   :   Disable E1
-    ATA    : Display sensor accelerometer in m/s^2
-    ATA1   :   Enable continuous accelerometer output
-    ATA0   :   Disable A1
-    ATY    : Display sensor gyroscope in rad/s
-    ATY1   :   Enable continuous gyroscope output
-    ATY0   :   Disable Y1
-    ATM    : Display sensor magnetometer in uT
-    ATM1   :   Enable continuous magnetometer output
-    ATM0   :   Disable G1
-    ATG    : Display sensor gravity in m/s^2
-    ATG1   :   Enable continuous gravity output
-    ATG0   :   Disable G1
-    ATL    : Display sensor linear accelerometer in m/s^2
-    ATL1   :   Enable continuous linear accelerometer output
-    ATL0   :   Disable L1
-    AT1    : Enable continuous linear accelerometer output of all sensor data
-    AT0    : Disable AT1
+    ATH      : Display help
+    ATI      : Display sensor details
+    ATS      : Display sensor status
+    ATC      : Display sensor status (calibration)
+    ATT      : Display sensor temperatur in C degree
+    ATO      : Display sensor orientation in Euler degree
+    ATO1     :   Enable continuous Euler degree output
+    ATO0     :   Disable E1
+    ATA      : Display sensor accelerometer in m/s^2
+    ATA1     :   Enable continuous accelerometer output
+    ATA0     :   Disable A1
+    ATY      : Display sensor gyroscope in rad/s
+    ATY1     :   Enable continuous gyroscope output
+    ATY0     :   Disable Y1
+    ATM      : Display sensor magnetometer in uT
+    ATM1     :   Enable continuous magnetometer output
+    ATM0     :   Disable G1
+    ATG      : Display sensor gravity in m/s^2
+    ATG1     :   Enable continuous gravity output
+    ATG0     :   Disable G1
+    ATL      : Display sensor linear accelerometer in m/s^2
+    ATL1     :   Enable continuous linear accelerometer output
+    ATL0     :   Disable L1
+    AT1      : Enable continuous linear accelerometer output of all sensor data
+    AT0      : Disable AT1
+    ATB=xxx  : Setting the baud rate. xxx can be 1200,2400,4800,9600,19200,38400,57600,115200
+               You need to reconnect. If we have a HC-06, the bluetooth speed is also changed.
+               This change is permanent.
+    ATF      : Shows the free RAM in bytes.
+
 
    =============================================================================
    Example:
@@ -63,7 +68,10 @@
    - Adding continuous output for the calibration and temperature.
    - Adding output for the internal BNO055 versions (Bootloader, SW Revision
      ID, GYRO chip ID...)
-   - Adding support for setting up an HC-06 modul (setup, pairing, baudrate)
+   - Adding support for setting up an HC-06 modul:
+        PIN:       todo
+        NAME:      todo
+        BAUDRATE:  DONE
    - Adding echo on/off? (for echoing the AT commands)
 
    =============================================================================
@@ -91,8 +99,10 @@
    Connect VDD to 5V DC
    Connect GROUND to common ground
    Connect A6 (=#4) HC-06 WAKEUP
-   
-   You should setup the HC-06 modul to the right baudrate separately. (WORKING)
+
+   The HC-06 baudrate can be set via the ATB=xxx command.
+   The HC-06 PIN can be set via the ATP=xxx command.            (TODO !)
+   The HC-06 bluetooth name can be set via the ATN=xxx command. (TODO !)
 
    =============================================================================
    Credits:
@@ -101,7 +111,6 @@
    Thanks to adafruit.
 
 */
-
 
 
 #include "Stream.h"
@@ -131,7 +140,7 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55);
 #define RXTX_PORT  Serial1
 
 // Just for infos or debugging
-#define DEBUG_PORT Serial
+//#define DEBUG_PORT Serial
 
 //==============================================================================
 
@@ -160,33 +169,32 @@ unsigned long lastOutputMs;
 
 const int MAX_COMMAND_LEN                  = 10;    // without MAX_BLUETOOTH_NAME_LEN
 const int MAX_BLUETOOTH_NAME_LEN           = 20;
+
 const int HC_06_WAKEUP_PIN                 = 4;
 
-boolean inHC06CommandMode = false;
 
+const int  CONFIG_EEPROM_STATUS_ADDR        = 0;
+const long CONFIG_EEPROM_MAGIC              = 0x74770116L + 3;     // tw16
 
-const int  HC06_EEPROM_STATUS_ADDR   = 0;
-const long HC06_EEPROM_MAGIC         = 0x74770116L;     // tw16
-
-struct hc06StatusType {
+struct configtatusType {
   long  magic;
   long  baudrate;
   char  blueToothName[MAX_BLUETOOTH_NAME_LEN];
-} hc06Status;
+} configStatus;
 
-/*
-  AT+BAUD1———1200
-  AT+BAUD2———2400
-  AT+BAUD3———4800
-  AT+BAUD4———9600 (Default)
-  AT+BAUD5———19200
-  AT+BAUD6———38400
-  AT+BAUD7———57600
-  AT+BAUD8———115200
-  AT+BAUD9———230400
-  AT+BAUDA———460800
-  AT+BAUDB———921600
-  AT+BAUDC———1382400
+/* Known HC-06 baudrates:
+    AT+BAUD1———1200
+    AT+BAUD2———2400
+    AT+BAUD3———4800
+    AT+BAUD4———9600 (Default)
+    AT+BAUD5———19200
+    AT+BAUD6———38400
+    AT+BAUD7———57600
+    AT+BAUD8———115200
+    AT+BAUD9———230400
+    AT+BAUDA———460800
+    AT+BAUDB———921600
+    AT+BAUDC———1382400
 */
 const long BAUD_RATES[] = { 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
 
@@ -205,8 +213,11 @@ void setup(void)
   DEBUG_PORT.println(F("Orientation_Bluetooth_Server Ver. 0.2")); DEBUG_PORT.println("");
 #endif
 
+  readConfigFromEEPROM();
+
   // Hardware serial:
-  RXTX_PORT.begin(2400);
+  RXTX_PORT.begin(configStatus.baudrate != 0 ? configStatus.baudrate : 9600);
+
 
   // HC-06
   if (USE_HC06) {
@@ -227,25 +238,22 @@ void initHC06()
   pinMode(HC_06_WAKEUP_PIN, OUTPUT);
   digitalWrite(HC_06_WAKEUP_PIN, 0);
 
-  readHC06BaudrateFromEEPROM();
 
 #ifdef DEBUG_PORT
   DEBUG_PORT.println(F("HC-06 init..."));
   DEBUG_PORT.print(F("  Baudrate       = "));
-  DEBUG_PORT.println(hc06Status.baudrate);
+  DEBUG_PORT.println(configStatus.baudrate);
   DEBUG_PORT.print(F("  Bluetooth Name = "));
-  DEBUG_PORT.println(hc06Status.blueToothName);
+  DEBUG_PORT.println(configStatus.blueToothName);
 #endif
 
-  if (hc06Status.baudrate == 0) {
+  if (configStatus.baudrate == 0) {
 #ifdef DEBUG_PORT
     DEBUG_PORT.println(F("--> need HC-06 baudrate scan."));
 #endif
 
     // Setting the HC-06 into the AT mode:
-    digitalWrite(HC_06_WAKEUP_PIN, 1);
-    delay(100);
-    digitalWrite(HC_06_WAKEUP_PIN, 0);
+    disconnectHC06();
 
     char buf[5];
     for (int i = 0; i < sizeof(BAUD_RATES) / sizeof(BAUD_RATES[0]); i++) {
@@ -277,14 +285,14 @@ void initHC06()
         DEBUG_PORT.println(F("  FOUND !"));
 #endif
 
-        hc06Status.baudrate = baudrate;
-        RXTX_PORT.begin(hc06Status.baudrate);
-        writeHC06BaudrateToEEPROM();        // Remember the baudrat
+        configStatus.baudrate = baudrate;
+        RXTX_PORT.begin(configStatus.baudrate);
+        writeConfigToEEPROM();        // Remember the baudrat
         break;
       }
     }   // for (baudrate scan
 
-    if (hc06Status.baudrate == 0) {
+    if (configStatus.baudrate == 0) {
 #ifdef DEBUG_PORT
       DEBUG_PORT.println(F("Boudrate not found, using 9600"));
 #endif
@@ -292,18 +300,18 @@ void initHC06()
       // Something is wrong, using the default baudrate 9600. Possible errors are:
       // - WAKEUP line not connected
       // - Not a HC-06 module on hardware serial port (wrong USE_HC06 on compile time?)
-      hc06Status.baudrate = 9600;
-      RXTX_PORT.begin(hc06Status.baudrate);
+      configStatus.baudrate = 9600;
+      RXTX_PORT.begin(configStatus.baudrate);
       // we don't write to the EEPROM. This will lead to a rescan next
       // time (give a chance for conncting the module...)
     }
   }
   else {
-    RXTX_PORT.begin(hc06Status.baudrate);
-    
+    RXTX_PORT.begin(configStatus.baudrate);
+
 #ifdef DEBUG_PORT
     DEBUG_PORT.print(F("Using baudrate from EEPROM = "));
-    DEBUG_PORT.println(hc06Status.baudrate);
+    DEBUG_PORT.println(configStatus.baudrate);
 #endif
   }
 
@@ -337,13 +345,6 @@ void loop(void)
 
     //    char c = toLowerCase( (char) in.read() );
     char c = (char) RXTX_PORT.read() ;
-
-    if (inHC06CommandMode) {
-#ifdef DEBUG_PORT
-      DEBUG_PORT.print(c);
-#endif
-      return;
-    }
 
     if (c != '\n' && c != '\r') {
       if (cmdBuffer.length() < (MAX_COMMAND_LEN + MAX_BLUETOOTH_NAME_LEN)) cmdBuffer = cmdBuffer +  c;
@@ -411,7 +412,7 @@ void initBno()
 //==============================================================================
 // Get the free memory.
 //==============================================================================
-int freeRam ()
+int freeRam()
 {
   extern int __heap_start, *__brkval;
   int v;
@@ -437,7 +438,12 @@ void parseCommand(Stream &out)
     out.println(currentStatus);
   }
   else {
-    out.println("ERROR: Unknown command |" + cmdBuffer + "|");
+    if (currentStatus != "OK") {
+      out.println("ERROR: Bad command. " + currentStatus);
+    }
+    else {
+      out.println("ERROR: Unknown command |" + cmdBuffer + "|");
+    }
   }
 
 }
@@ -458,52 +464,43 @@ byte parseCommandInternal(Stream &out)
 
   if (cmdBuffer == "ath") {
     out.println(F("HELP:"));
-    out.println(F("  AT     : OK"));
-    out.println(F("  ATH    : Display help"));
-    out.println(F("  ATI    : Display sensor details"));
-    out.println(F("  ATS    : Display sensor status"));
-    out.println(F("  ATC    : Display sensor status (calibration)"));
-    out.println(F("  ATT    : Display sensor temperatur in C degree"));
-    out.println(F("  ATO    : Display sensor orientation in Euler degree"));
-    out.println(F("  ATO1   :   Enable continuous orientation output"));
-    out.println(F("  ATO0   :   Disable O1"));
-    out.println(F("  ATA    : Display sensor accelerometer in m/s^2"));
-    out.println(F("  ATA1   :   Enable continuous accelerometer output"));
-    out.println(F("  ATA0   :   Disable A1"));
-    out.println(F("  ATY    : Display sensor gyroscope in rad/s"));
-    out.println(F("  ATY1   :   Enable continuous gyroscope output"));
-    out.println(F("  ATY0   :   Disable Y1"));
-    out.println(F("  ATM    : Display sensor magnetometer in uT"));
-    out.println(F("  ATM1   :   Enable continuous magnetometer output"));
-    out.println(F("  ATM0   :   Disable G1"));
-    out.println(F("  ATG    : Display sensor gravity in m/s^2"));
-    out.println(F("  ATG1   :   Enable continuous gravity output"));
-    out.println(F("  ATG0   :   Disable G1"));
-    out.println(F("  ATL    : Display sensor linear accelerometer in m/s^2"));
-    out.println(F("  ATL1   :   Enable continuous linear accelerometer output"));
-    out.println(F("  ATL0   :   Disable L1"));
+    out.println(F("  AT       : OK"));
+    out.println(F("  ATH      : Display help"));
+    out.println(F("  ATI      : Display sensor details"));
+    out.println(F("  ATS      : Display sensor status"));
+    out.println(F("  ATC      : Display sensor status (calibration)"));
+    out.println(F("  ATT      : Display sensor temperatur in C degree"));
+    out.println(F("  ATO      : Display sensor orientation in Euler degree"));
+    out.println(F("  ATO1     :   Enable continuous orientation output"));
+    out.println(F("  ATO0     :   Disable O1"));
+    out.println(F("  ATA      : Display sensor accelerometer in m/s^2"));
+    out.println(F("  ATA1     :   Enable continuous accelerometer output"));
+    out.println(F("  ATA0     :   Disable A1"));
+    out.println(F("  ATY      : Display sensor gyroscope in rad/s"));
+    out.println(F("  ATY1     :   Enable continuous gyroscope output"));
+    out.println(F("  ATY0     :   Disable Y1"));
+    out.println(F("  ATM      : Display sensor magnetometer in uT"));
+    out.println(F("  ATM1     :   Enable continuous magnetometer output"));
+    out.println(F("  ATM0     :   Disable G1"));
+    out.println(F("  ATG      : Display sensor gravity in m/s^2"));
+    out.println(F("  ATG1     :   Enable continuous gravity output"));
+    out.println(F("  ATG0     :   Disable G1"));
+    out.println(F("  ATL      : Display sensor linear accelerometer in m/s^2"));
+    out.println(F("  ATL1     :   Enable continuous linear accelerometer output"));
+    out.println(F("  ATL0     :   Disable L1"));
 
-    out.println(F("  AT1    : Enable continuous linear accelerometer output of all sensor data"));
-    out.println(F("  AT0    : Disable AT1"));
+    out.println(F("  AT1      : Enable continuous linear accelerometer output of all sensor data"));
+    out.println(F("  AT0      : Disable AT1"));
 
-    // HC-06
-    //out.println(F("  ATP    : Toggle wakeup line for 0.1s"));
 
-    return 1;
-  }
+    out.println(F("  ATB=xxx  : Setting the baud rate. xxx can be 1200,2400,4800,9600,19200,38400,57600,115200"));
+    out.println(F("             You need to reconnect. If we have a HC-06, the bluetooth speed is also changed"));
+    out.println(F("             This change is permanent."));
 
-/*
-  if (cmdBuffer == "atp") {
-    digitalWrite(HC_06_WAKEUP_PIN, 1);
-    delay(200);
-    digitalWrite(HC_06_WAKEUP_PIN, 0);
-    inHC06CommandMode = true;
-
-    out.print("AT+VERSION\n");
+    out.println(F("  ATF      : Shows the free RAM in bytes."));
 
     return 1;
   }
-*/
 
   //----------------------------------------------------------------------------
 
@@ -665,8 +662,79 @@ byte parseCommandInternal(Stream &out)
     return 1;
   }
 
+  //----------------------------------------------------------------------------
+  // Connection parameters (HC-06, baudrate...)
+  //----------------------------------------------------------------------------
+  if (cmdBuffer.startsWith("atb=")) {
+    String n = cmdBuffer.substring(4);
+    long baudrate = (long) n.toFloat();     // we need float, baudrate > INT2...
+
+#ifdef DEBUG_PORT
+    DEBUG_PORT.print("Baud = ");
+    DEBUG_PORT.println(baudrate);
+#endif
+
+    int idxFound = -1;
+    for (int i = 0; i < sizeof(BAUD_RATES) / sizeof(BAUD_RATES[0]); i++) {
+      if (baudrate == BAUD_RATES[i]) {
+        idxFound = i;
+        break;
+      }
+    } // for
+
+    if (idxFound == -1) {
+      currentStatus = "Unknown baudrate";
+      return 0;
+    }
+
+    if (USE_HC06) {
+      disconnectHC06();
+      delay(500);
+      // Sending AT+BAUDx command to the HC-06. x is our index inside BAUD_RATES + 1
+      RXTX_PORT.print("AT+BAUD");
+      RXTX_PORT.print(idxFound + 1);
+      RXTX_PORT.flush();
+
+      // Read the answer in the old baudrate.
+      while (true) {
+        char c = readCharFromHC06(900);   // the HC-06 needs a little time for starting the answer....
+        if (c == '?') break;
+
+#ifdef DEBUG_PORT
+        DEBUG_PORT.print(c);
+#endif
+      }
+#ifdef DEBUG_PORT
+      DEBUG_PORT.println("---Done");
+#endif
+    }
+    configStatus.baudrate = baudrate;
+    writeConfigToEEPROM();
+    RXTX_PORT.begin(baudrate);
+
+    return 1;
+  }
+
+  //----------------------------------------------------------------------------
+  // Show the free memory
+  //----------------------------------------------------------------------------
+  if (cmdBuffer == "atf") {
+    RXTX_PORT.print("FREE=");
+    RXTX_PORT.println(freeRam());
+    return 1;
+  }
+
   return 0;
 
+}
+
+//==============================================================================
+// Setting the HC-06 into the AT mode:
+//==============================================================================
+void disconnectHC06() {
+  digitalWrite(HC_06_WAKEUP_PIN, 1);
+  delay(100);
+  digitalWrite(HC_06_WAKEUP_PIN, 0);
 }
 
 //==============================================================================
@@ -766,7 +834,6 @@ void displayTemperature(Stream &out)
   out.println("");
 }
 
-
 //==============================================================================
 // Common output function for different sensors, see display*() functions:
 //==============================================================================
@@ -833,20 +900,27 @@ void displayGravity(Stream &out)
 {
   displayVector(out, "Gravity", "Grav", displayGravityValues, Adafruit_BNO055::VECTOR_GRAVITY);
 }
-//==============================================================================
 
-void writeHC06BaudrateToEEPROM() {
-  hc06Status.magic    = HC06_EEPROM_MAGIC;
-  EEPROM.put(HC06_EEPROM_STATUS_ADDR, hc06Status);
+//==============================================================================
+// Write the the current configuration from configStatus.
+//==============================================================================
+void writeConfigToEEPROM() {
+  configStatus.magic    = CONFIG_EEPROM_MAGIC;
+  EEPROM.put(CONFIG_EEPROM_STATUS_ADDR, configStatus);
 }
 
-void readHC06BaudrateFromEEPROM() {
-  EEPROM.get(HC06_EEPROM_STATUS_ADDR, hc06Status);
+//==============================================================================
+// Read the current configuration into configStatus.
+// We fill configStatus with zeros if the EEPROM contains the wrong MAGIC
+// number.
+//==============================================================================
+void readConfigFromEEPROM() {
+  EEPROM.get(CONFIG_EEPROM_STATUS_ADDR, configStatus);
 
   // Setup status for the first time
-  if (hc06Status.magic != HC06_EEPROM_MAGIC) {
-    hc06Status.baudrate = 0;
-    memset(hc06Status.blueToothName, 0, sizeof(hc06Status.blueToothName));
+  if (configStatus.magic != CONFIG_EEPROM_MAGIC) {
+    configStatus.baudrate = 0;
+    memset(configStatus.blueToothName, 0, sizeof(configStatus.blueToothName));
   }
 }
 
