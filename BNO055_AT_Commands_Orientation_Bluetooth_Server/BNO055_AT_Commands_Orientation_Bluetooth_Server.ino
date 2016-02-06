@@ -53,7 +53,7 @@
     ......
    ATO0
     OK
-    
+
    =============================================================================
    ToDo:
    =============================================================================
@@ -90,8 +90,9 @@
    Connect RX to HC-06 TX
    Connect VDD to 5V DC
    Connect GROUND to common ground
-
-   You should setup the HC-06 modul to the right baudrate separately.
+   Connect A6 (=#4) HC-06 WAKEUP
+   
+   You should setup the HC-06 modul to the right baudrate separately. (WORKING)
 
    =============================================================================
    Credits:
@@ -106,11 +107,13 @@
 #include "Stream.h"
 
 #include <Wire.h>
+#include <EEPROM.h>
+
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
 
-
+static const boolean USE_HC06 = true;
 
 //==============================================================================
 // BMo055 sensor from Adafruit library
@@ -123,13 +126,12 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55);
 // this default configuration I'm using an HC-06 modul attached on that serial
 // port. If you are using an Arduino Nano or don't use this modul use the
 // default "Serial" port (which "ends" on the USB port) instead "Serial1".
-// See also the setup() function for initialization of the boudrate!
+// See also the setup() function for initialization of the baudrate!
 //==============================================================================
-Stream& out     = Serial1;
-Stream& in      = Serial1;
+#define RXTX_PORT  Serial1
 
 // Just for infos or debugging
-// Stream& infoOut = Serial;
+#define DEBUG_PORT Serial
 
 //==============================================================================
 
@@ -156,22 +158,169 @@ boolean displayLinearAccelerometerValues   = false;
 // Last output time for the continuous output in ms:
 unsigned long lastOutputMs;
 
+const int MAX_COMMAND_LEN                  = 10;    // without MAX_BLUETOOTH_NAME_LEN
+const int MAX_BLUETOOTH_NAME_LEN           = 20;
+const int HC_06_WAKEUP_PIN                 = 4;
+
+boolean inHC06CommandMode = false;
+
+
+const int  HC06_EEPROM_STATUS_ADDR   = 0;
+const long HC06_EEPROM_MAGIC         = 0x74770116L;     // tw16
+
+struct hc06StatusType {
+  long  magic;
+  long  baudrate;
+  char  blueToothName[MAX_BLUETOOTH_NAME_LEN];
+} hc06Status;
+
+/*
+  AT+BAUD1———1200
+  AT+BAUD2———2400
+  AT+BAUD3———4800
+  AT+BAUD4———9600 (Default)
+  AT+BAUD5———19200
+  AT+BAUD6———38400
+  AT+BAUD7———57600
+  AT+BAUD8———115200
+  AT+BAUD9———230400
+  AT+BAUDA———460800
+  AT+BAUDB———921600
+  AT+BAUDC———1382400
+*/
+const long BAUD_RATES[] = { 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
+
 //==============================================================================
 // Arduino setup function (automatically called at startup)
 //==============================================================================
 void setup(void)
 {
-  // Hardware Seriel:
-  Serial1.begin(2400);
-  Serial1.println(F("Orientation_Bluetooth_Server Ver. 0.1")); Serial1.println("");
 
   // USB:
-  // Serial.begin(9600);
-  // Serial.println(F("Orientation_Bluetooth_Server Ver. 0.1")); Serial.println("");
+#ifdef DEBUG_PORT
+  DEBUG_PORT.begin(9600);
+  while (!DEBUG_PORT) {
+    ; // wait for serial port to connect. Needed for native USB
+  }
+  DEBUG_PORT.println(F("Orientation_Bluetooth_Server Ver. 0.2")); DEBUG_PORT.println("");
+#endif
+
+  // Hardware serial:
+  RXTX_PORT.begin(2400);
+
+  // HC-06
+  if (USE_HC06) {
+    initHC06();
+  }
+
+  RXTX_PORT.println(F("Orientation_Bluetooth_Server Ver. 0.2")); RXTX_PORT.println("");
+
+  //  inHC06CommandMode = true;
+  //  RXTX_PORT.print("AT");
+  //  RXTX_PORT.print("AT+VERSION");
 
   lastOutputMs = millis();
 }
 
+void initHC06()
+{
+  pinMode(HC_06_WAKEUP_PIN, OUTPUT);
+  digitalWrite(HC_06_WAKEUP_PIN, 0);
+
+  readHC06BaudrateFromEEPROM();
+
+#ifdef DEBUG_PORT
+  DEBUG_PORT.println(F("HC-06 init..."));
+  DEBUG_PORT.print(F("  Baudrate       = "));
+  DEBUG_PORT.println(hc06Status.baudrate);
+  DEBUG_PORT.print(F("  Bluetooth Name = "));
+  DEBUG_PORT.println(hc06Status.blueToothName);
+#endif
+
+  if (hc06Status.baudrate == 0) {
+#ifdef DEBUG_PORT
+    DEBUG_PORT.println(F("--> need HC-06 baudrate scan."));
+#endif
+
+    // Setting the HC-06 into the AT mode:
+    digitalWrite(HC_06_WAKEUP_PIN, 1);
+    delay(100);
+    digitalWrite(HC_06_WAKEUP_PIN, 0);
+
+    char buf[5];
+    for (int i = 0; i < sizeof(BAUD_RATES) / sizeof(BAUD_RATES[0]); i++) {
+      long baudrate = BAUD_RATES[i];
+
+#ifdef DEBUG_PORT
+      DEBUG_PORT.print(F("  check "));
+      DEBUG_PORT.print(baudrate);
+#endif
+
+      RXTX_PORT.begin(baudrate);
+
+      delay(10);
+      RXTX_PORT.print("AT");        // --> should give "OK"
+      RXTX_PORT.flush();
+
+      buf[0] = readCharFromHC06(900);   // the HC-06 needs a little time for starting the answer....
+      buf[1] = readCharFromHC06(100);
+      buf[2] = '\0';
+
+#ifdef DEBUG_PORT
+      DEBUG_PORT.print(F("  answer = |"));
+      DEBUG_PORT.print(buf);
+      DEBUG_PORT.println("|");
+#endif
+
+      if (buf[0] == 'O' && buf[1] == 'K') {
+#ifdef DEBUG_PORT
+        DEBUG_PORT.println(F("  FOUND !"));
+#endif
+
+        hc06Status.baudrate = baudrate;
+        RXTX_PORT.begin(hc06Status.baudrate);
+        writeHC06BaudrateToEEPROM();        // Remember the baudrat
+        break;
+      }
+    }   // for (baudrate scan
+
+    if (hc06Status.baudrate == 0) {
+#ifdef DEBUG_PORT
+      DEBUG_PORT.println(F("Boudrate not found, using 9600"));
+#endif
+
+      // Something is wrong, using the default baudrate 9600. Possible errors are:
+      // - WAKEUP line not connected
+      // - Not a HC-06 module on hardware serial port (wrong USE_HC06 on compile time?)
+      hc06Status.baudrate = 9600;
+      RXTX_PORT.begin(hc06Status.baudrate);
+      // we don't write to the EEPROM. This will lead to a rescan next
+      // time (give a chance for conncting the module...)
+    }
+  }
+  else {
+    RXTX_PORT.begin(hc06Status.baudrate);
+    
+#ifdef DEBUG_PORT
+    DEBUG_PORT.print(F("Using baudrate from EEPROM = "));
+    DEBUG_PORT.println(hc06Status.baudrate);
+#endif
+  }
+
+
+}
+
+// Read char from seriel with timeout. Stream.setTimeout() is not working...
+char readCharFromHC06(int timeOutMs)
+{
+  while (timeOutMs > 0 && !RXTX_PORT.available()) {
+    timeOutMs--;
+    delay(1);
+  }
+  if (timeOutMs == 0) return '?';
+
+  return RXTX_PORT.read();
+}
 //==============================================================================
 // Arduino loop function, called once 'setup' is complete in an endless loop
 //==============================================================================
@@ -184,19 +333,35 @@ void loop(void)
   // Checking for incomming AT commands. We are collecting the characters
   // in cmdBuffer and start parsing after an we got a \n.
   //----------------------------------------------------------------------------
-  if (in.available()) {
+  if (RXTX_PORT.available()) {
 
-    char c = toLowerCase( (char) in.read() );
+    //    char c = toLowerCase( (char) in.read() );
+    char c = (char) RXTX_PORT.read() ;
+
+    if (inHC06CommandMode) {
+#ifdef DEBUG_PORT
+      DEBUG_PORT.print(c);
+#endif
+      return;
+    }
 
     if (c != '\n' && c != '\r') {
-      if (cmdBuffer.length() < 10) cmdBuffer = cmdBuffer +  c;
+      if (cmdBuffer.length() < (MAX_COMMAND_LEN + MAX_BLUETOOTH_NAME_LEN)) cmdBuffer = cmdBuffer +  c;
     }
 
     if (c == '\n') {
-      parseCommand(out);
+      parseCommand(RXTX_PORT);
       cmdBuffer = "";
     }
   }
+
+  // Testing: Read USB serial and send it to the HC-06:
+  //if (DEBUG_PORT.available()) {
+  //  char c = DEBUG_PORT.read();
+  //  DEBUG_PORT.print(c);
+  //  RXTX_PORT.print(c);
+  //}
+
 
   //----------------------------------------------------------------------------
   // Output enabled continuous outputs.
@@ -213,12 +378,12 @@ void loop(void)
   if (msSinceLastOutput >= continuousOutputDelay) {
     lastOutputMs = now;
 
-    if (displayEulerValues)               displayEuler(out);
-    if (displayAccelerometerValues)       displayAccelerometer(out);
-    if (displayGyroscopeValues)           displayGyroscope(out);
-    if (displayMagnetometerValues)        displayMagnetometer(out);
-    if (displayGravityValues)             displayGravity(out);
-    if (displayLinearAccelerometerValues) displayLinearAccelerometer(out);
+    if (displayEulerValues)               displayEuler(RXTX_PORT);
+    if (displayAccelerometerValues)       displayAccelerometer(RXTX_PORT);
+    if (displayGyroscopeValues)           displayGyroscope(RXTX_PORT);
+    if (displayMagnetometerValues)        displayMagnetometer(RXTX_PORT);
+    if (displayGravityValues)             displayGravity(RXTX_PORT);
+    if (displayLinearAccelerometerValues) displayLinearAccelerometer(RXTX_PORT);
   }
 
 }
@@ -321,8 +486,24 @@ byte parseCommandInternal(Stream &out)
     out.println(F("  AT1    : Enable continuous linear accelerometer output of all sensor data"));
     out.println(F("  AT0    : Disable AT1"));
 
+    // HC-06
+    //out.println(F("  ATP    : Toggle wakeup line for 0.1s"));
+
     return 1;
   }
+
+/*
+  if (cmdBuffer == "atp") {
+    digitalWrite(HC_06_WAKEUP_PIN, 1);
+    delay(200);
+    digitalWrite(HC_06_WAKEUP_PIN, 0);
+    inHC06CommandMode = true;
+
+    out.print("AT+VERSION\n");
+
+    return 1;
+  }
+*/
 
   //----------------------------------------------------------------------------
 
@@ -566,7 +747,7 @@ boolean hasSystemCalibration()
 {
   uint8_t system, gyro, accel, mag;
   system = gyro = accel = mag = 0;
-  
+
   bno.getCalibration(&system, &gyro, &accel, &mag);
 
   return system != 0;
@@ -595,7 +776,7 @@ void displayVector(Stream   &out,
                    boolean  displayRequest,
                    Adafruit_BNO055::adafruit_vector_type_t vector_type)
 {
-    
+
   // We are only using the system calibration flag, see TODO list.
   if (!hasSystemCalibration()) {
     out.println(what + ": No calibration!");
@@ -654,6 +835,19 @@ void displayGravity(Stream &out)
 }
 //==============================================================================
 
+void writeHC06BaudrateToEEPROM() {
+  hc06Status.magic    = HC06_EEPROM_MAGIC;
+  EEPROM.put(HC06_EEPROM_STATUS_ADDR, hc06Status);
+}
 
+void readHC06BaudrateFromEEPROM() {
+  EEPROM.get(HC06_EEPROM_STATUS_ADDR, hc06Status);
+
+  // Setup status for the first time
+  if (hc06Status.magic != HC06_EEPROM_MAGIC) {
+    hc06Status.baudrate = 0;
+    memset(hc06Status.blueToothName, 0, sizeof(hc06Status.blueToothName));
+  }
+}
 
 

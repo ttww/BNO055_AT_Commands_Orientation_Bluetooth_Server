@@ -61,7 +61,7 @@ OK
 - Adding continuous output for the calibration and temperature.
 - Adding output for the internal BNO055 versions (Bootloader, SW Revision ID,
   GYRO chip ID...)
-- Adding support for setting up an HC-06 modul (setup, pairing, baudrate)
+- Adding support for setting up an HC-06 modul (setup, pairing, baudrate)  WORKING!
 - Adding echo on/off? (for echoing the AT commands)
 
 ### Additional needed software:
