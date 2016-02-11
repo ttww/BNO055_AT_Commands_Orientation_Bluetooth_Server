@@ -494,7 +494,7 @@ byte parseCommandInternal(Stream &out)
 
 
     out.println(F("  ATB=xxx  : Setting the baud rate. xxx can be 1200,2400,4800,9600,19200,38400,57600,115200"));
-    out.println(F("             You need to reconnect. If we have a HC-06, the bluetooth speed is also changed"));
+    out.println(F("             You need to reconnect. If we have a HC-06, the bluetooth speed is also changed."));
     out.println(F("             This change is permanent."));
 
     out.println(F("  ATF      : Shows the free RAM in bytes."));
